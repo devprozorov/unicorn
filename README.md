@@ -88,3 +88,95 @@ npm run build
 По вопросам поддержки и работы платформы:
 - **Email:** пример tumyp2003map@mail.ru
 - **Телефон:** пример +7 912 563-33-89
+
+---
+
+# 🦄 UnicornStar (English)
+
+**UnicornStar** is a job search and recruitment platform focused on honest and direct dialogue between employers (founders) and applicants. We eliminate "HR fluff," endless test assignments, and auto-filters, providing tools for fast and secure interaction.
+
+## 📋 About the Project
+
+The platform is built on the philosophy of direct communication. We are against formalism and "concept substitution."
+- **For applicants:** The ability to find a startup or company with sensible processes and create a concise and clear resume.
+- **For employers:** Tools to find responsible people without unnecessary bureaucracy.
+
+## 🚀 Core Functionality
+
+### 👥 User Roles
+1.  **Applicant (User):**
+    - Create and edit a resume.
+    - Search for vacancies by keywords, location, and salary.
+    - Apply for vacancies (requires TOTP).
+    - Chat with employers.
+    - Manage applications (hide irrelevant ones).
+
+2.  **Employer (Company):**
+    - Create a company profile (logo, description, social media).
+    - Post vacancies.
+    - View applications and candidate resumes.
+    - Built-in chat with candidates.
+    - Premium features to highlight vacancies.
+
+### 🔐 Security
+- **TOTP (Two-Factor Authentication):** Mandatory two-factor authentication for all active actions (creating resumes, vacancies, applications, chats). Uses apps like Google Authenticator or Authy.
+- **Verification:** Manual verification of vacancies and companies to protect against fraud.
+- **Encryption:** Protection of passwords and confidential data.
+
+### 💎 Monetization (Premium)
+Integration with the **Robokassa** payment system.
+- **For companies:** "Golden" vacancies, priority in search results, highlighted with a border.
+- **For applicants:** Highlighting applications in the employer's "Inbox," priority consideration.
+
+## 🛠 Tech Stack
+
+### Frontend
+- **Framework:** [Nuxt 3](https://nuxt.com/) (Vue 3)
+- **Language:** TypeScript
+- **Styling:** Tailwind CSS
+- **Icons:** Emoji / SVG
+- **State Management:** Nuxt Composables (`useState`, etc.)
+
+### Backend
+- **Language:** Go (Golang)
+- **Framework:** Gin Web Framework — a fast HTTP web framework.
+- **Database:** MongoDB — a document-oriented database for flexible storage of profiles and vacancies.
+- **Architecture:** Modular Monolith using Clean Architecture.
+- **Auth:** JWT (Access/Refresh tokens) + TOTP (Google Authenticator) for critical actions.
+- **File Storage:** Local storage for static files (avatars) with ULID-generated names.
+- **Payments:** Integration with Robokassa (Webhooks/Callbacks).
+
+## 📦 Installation and Launch (Frontend)
+
+Make sure you have Node.js installed.
+
+```bash
+# Install dependencies
+npm install
+
+# Run in development mode
+npm run dev
+
+# Build for production
+npm run build
+```
+
+## 📂 Project Structure (Frontend)
+
+- `app/pages/` — Application pages (Nuxt routing).
+    - `doc/` — Knowledge base and documentation.
+    - `legal/` — Legal documents (Offer, Privacy Policy).
+- `app/components/` — Reusable Vue components (Header, Footer, etc.).
+- `app/composables/` — Logic (e.g., `useI18n`).
+
+## 📄 Legal Information
+
+- **Privacy Policy:** example Processing of personal data in accordance with FZ-152.
+- **Offer:** example Public contract for the provision of information and consulting services.
+- **Details:** example LLC "UNICORN STAR", INN 1103048119.
+
+## 📞 Contacts
+
+For support and platform operation inquiries:
+- **Email:** example tumyp2003map@mail.ru
+- **Phone:** example +7 912 563-33-89
