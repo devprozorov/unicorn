@@ -1,0 +1,507 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+
+jobs:
+  test_dev:
+    if: gitea.ref_name == 'dev'
+    runs-on: debian
+    container:
+      image: mcr.microsoft.com/playwright:v1.50.0-jammy
+    steps:
+      - name: Free up disk space
+        shell: bash
+        run: |
+          echo "=== Cleaning up disk space ==="
+          df -h
+          
+          # Очистка старых временных файлов тестов
+          echo "Cleaning old test directories..."
+          find /tmp -maxdepth 1 -name "unicorn-front-test-*" -type d -mtime +1 -exec rm -rf {} \; 2>/dev/null || true
+          
+          # Очистка старых логов
+          echo "Cleaning old test logs..."
+          find /tmp -maxdepth 1 -name "*_log_*.txt" -mtime +1 -delete 2>/dev/null || true
+          find /tmp -maxdepth 1 -name "mantis_*" -mtime +1 -delete 2>/dev/null || true
+          
+          # Очистка кеша gitea-runner
+          echo "Cleaning gitea-runner cache..."
+          rm -rf /var/lib/gitea-runner/.cache/act/* 2>/dev/null || true
+          
+          # Очистка Docker
+          echo "Cleaning Docker resources..."
+          docker system prune -af --volumes 2>/dev/null || true
+          
+          # Очистка npm cache
+          echo "Cleaning npm cache..."
+          npm cache clean --force 2>/dev/null || true
+          
+          echo "=== Disk space after cleanup ==="
+          df -h
+          
+      - name: Checkout code
+        shell: bash
+        run: |
+          apt-get update && apt-get install -y git curl python3
+          mkdir -p /tmp/unicorn-front-test-${{ gitea.run_number }}
+          cd /tmp/unicorn-front-test-${{ gitea.run_number }}
+          git clone --depth 1 -b ${{ gitea.ref_name }} https://${{ gitea.actor }}:${{ gitea.token }}@pibble.shop/MiracleScape/unicorn-front.git .
+      
+      - name: package.json is valid check
+        shell: bash
+        run: |
+          cd /tmp/unicorn-front-test-${{ gitea.run_number }}
+          echo "=== Checking package.json syntax ==="
+          cat unicorn/package.json | python3 -m json.tool > /dev/null && echo "✓ package.json is valid"
+
+      - name: Install Node.js
+        shell: bash
+        run: |
+          echo "=== Node.js is pre-installed in Playwright image ==="
+          node --version
+          npm --version
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          cd /tmp/unicorn-front-test-${{ gitea.run_number }}/unicorn
+          echo "=== Installing dependencies ==="
+          npm install
+
+      - name: Build and start dev server
+        shell: bash
+        run: |
+          cd /tmp/unicorn-front-test-${{ gitea.run_number }}/unicorn
+          echo "=== Starting Nuxt dev server in background ==="
+          
+          # Запускаем dev сервер в фоне
+          nohup npm run dev > /tmp/nuxt-server-${{ gitea.run_number }}.log 2>&1 &
+          SERVER_PID=$!
+          echo $SERVER_PID > /tmp/nuxt-server-${{ gitea.run_number }}.pid
+          echo "Server started with PID: $SERVER_PID"
+          
+          # Ждем пока сервер поднимется
+          echo "Waiting for server to be ready..."
+          MAX_ATTEMPTS=60
+          ATTEMPT=0
+          
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            if curl -s http://localhost:3000 > /dev/null 2>&1; then
+              echo "✓ Server is ready!"
+              break
+            fi
+            ATTEMPT=$((ATTEMPT + 1))
+            echo "Attempt $ATTEMPT/$MAX_ATTEMPTS - waiting..."
+            sleep 2
+          done
+          
+          if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
+            echo "✗ Server failed to start within timeout"
+            echo "=== Server logs ==="
+            cat /tmp/nuxt-server-${{ gitea.run_number }}.log
+            kill $SERVER_PID 2>/dev/null || true
+            exit 1
+          fi
+          
+          echo "=== Server logs (first 50 lines) ==="
+          head -n 50 /tmp/nuxt-server-${{ gitea.run_number }}.log
+
+      - name: Run E2E tests
+        id: e2e_test
+        continue-on-error: true
+        shell: bash
+        run: |
+          cd /tmp/unicorn-front-test-${{ gitea.run_number }}/unicorn
+          echo "=== Running E2E tests ==="
+          npm run test:e2e 2>&1 | tee /tmp/e2e_test_log_${{ gitea.run_number }}.txt
+          TEST_STATUS=${PIPESTATUS[0]}
+          echo "✓ E2E tests completed"
+          exit $TEST_STATUS
+
+      - name: Send test report to MantisBT
+        if: always()
+        shell: bash
+        run: |
+          # Извлекаем результаты тестов из лога
+          TEST_LOG=$(cat /tmp/e2e_test_log_${{ gitea.run_number }}.txt 2>/dev/null || echo "Log file not found")
+          
+          # Фильтруем важные строки
+          ERRORS=$(echo "$TEST_LOG" | grep -iE "error|failed|fatal" || echo "No errors found")
+          TEST_RESULTS=$(echo "$TEST_LOG" | grep -E "passed|failed|skipped|expected" || echo "No test results")
+          
+          # Определяем статус тестов
+          if [ "${{ steps.e2e_test.outcome }}" = "success" ]; then
+            TEST_STATUS="E2E Tests PASSED"
+            PRIORITY="10"
+            SEVERITY="10"
+          else
+            TEST_STATUS="E2E Tests FAILED"
+            PRIORITY="40"
+            SEVERITY="50"
+          fi
+          
+          # Сохраняем данные во временные файлы
+          echo "$ERRORS" > /tmp/test_errors_${{ gitea.run_number }}.txt
+          echo "$TEST_RESULTS" > /tmp/test_results_${{ gitea.run_number }}.txt
+          echo "$TEST_LOG" > /tmp/test_fulllog_${{ gitea.run_number }}.txt
+          
+          {
+            echo "E2E Test Report from Gitea CI/CD"
+            echo ""
+            echo "Test Information:"
+            echo "- Branch: ${{ gitea.ref_name }}"
+            echo "- Commit: ${{ gitea.sha }}"
+            echo "- Run Number: ${{ gitea.run_number }}"
+            echo "- Status: $TEST_STATUS"
+            echo "- Repository: ${{ gitea.repository }}"
+            echo "- Actor: ${{ gitea.actor }}"
+            echo ""
+            echo "Test Results:"
+            cat /tmp/test_results_${{ gitea.run_number }}.txt
+            echo ""
+            echo "Errors:"
+            cat /tmp/test_errors_${{ gitea.run_number }}.txt
+            echo ""
+            echo "Full Test Log (truncated):"
+            cat /tmp/test_fulllog_${{ gitea.run_number }}.txt | head -n 200
+          } > /tmp/mantis_test_description_${{ gitea.run_number }}.txt
+          
+          # Отправляем в MantisBT
+          RUN_NUM="${{ gitea.run_number }}"
+          REF_NAME="${{ gitea.ref_name }}"
+          
+          echo "=== Creating MantisBT payload ==="
+          python3 -c 'import json,sys;r,s,n,p,v=sys.argv[1:6];d=open(f"/tmp/mantis_test_description_{r}.txt").read();json.dump({"summary":f"[Gitea E2E Tests #{r}] {s} - {n}","description":d,"project":{"name":"unistar MVP"},"category":{"name":"from Test [gitea]"},"version":"MVP V1","tags":[{"name":"e2e-test"}],"priority":{"id":int(p)},"severity":{"id":int(v)}},open(f"/tmp/mantis_test_payload_{r}.json","w"))' "$RUN_NUM" "$TEST_STATUS" "$REF_NAME" "$PRIORITY" "$SEVERITY"
+          
+          if [ -f /tmp/mantis_test_payload_${{ gitea.run_number }}.json ]; then
+            echo "✓ Payload created successfully"
+            echo "Payload content:"
+            cat /tmp/mantis_test_payload_${{ gitea.run_number }}.json | head -c 500
+            echo ""
+          else
+            echo "✗ Failed to create payload"
+            exit 1
+          fi
+          
+          echo "=== Sending to MantisBT ==="
+          MANTIS_TOKEN="${{ secrets.MANTIS_API_TOKEN }}"
+          if [ -z "$MANTIS_TOKEN" ]; then
+            echo "⚠️  MANTIS_API_TOKEN secret is not set - skipping MantisBT report"
+            echo "To enable MantisBT reports, add MANTIS_API_TOKEN in repository Settings → Secrets → Actions"
+          else
+            echo "Token configured (length: ${#MANTIS_TOKEN} chars)"
+            
+            echo "Attempting to send to MantisBT..."
+            RESPONSE=$(curl -X POST "http://178.128.188.105:8081/api/rest/issues" \
+              -H "Content-Type: application/json" \
+              -H "Authorization: $MANTIS_TOKEN" \
+              -d @/tmp/mantis_test_payload_${{ gitea.run_number }}.json \
+              -w "\nHTTP_CODE:%{http_code}" \
+              -s -v 2>&1)
+            
+            HTTP_CODE=$(echo "$RESPONSE" | grep "HTTP_CODE:" | cut -d: -f2)
+            BODY=$(echo "$RESPONSE" | sed '/HTTP_CODE:/d')
+            
+            echo "HTTP Status: $HTTP_CODE"
+            echo "Full Response:"
+            echo "$BODY" | head -n 50
+            
+            if [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "200" ]; then
+              echo "✓ Successfully sent test report to MantisBT"
+            else
+              echo "✗ Failed to send test report to MantisBT (HTTP $HTTP_CODE)"
+              if [ "$HTTP_CODE" = "403" ]; then
+                echo "Error: Access denied. Please check:"
+                echo "  1. User has permission to create issues in project 'unistar MVP'"
+                echo "  2. Category 'from Test [gitea]' exists"
+                echo "  3. Version 'MVP V1' exists in the project"
+                echo "  4. Tag 'e2e-test' exists or can be created"
+              fi
+            fi
+          fi
+          
+          # Удаляем временные файлы
+          rm -f /tmp/e2e_test_log_${{ gitea.run_number }}.txt
+          rm -f /tmp/mantis_test_description_${{ gitea.run_number }}.txt
+          rm -f /tmp/mantis_test_payload_${{ gitea.run_number }}.json
+          rm -f /tmp/test_errors_${{ gitea.run_number }}.txt
+          rm -f /tmp/test_results_${{ gitea.run_number }}.txt
+          rm -f /tmp/test_fulllog_${{ gitea.run_number }}.txt
+          
+          # Останавливаем dev сервер
+          if [ -f /tmp/nuxt-server-${{ gitea.run_number }}.pid ]; then
+            SERVER_PID=$(cat /tmp/nuxt-server-${{ gitea.run_number }}.pid)
+            echo "Stopping dev server (PID: $SERVER_PID)"
+            kill $SERVER_PID 2>/dev/null || true
+            rm -f /tmp/nuxt-server-${{ gitea.run_number }}.pid
+            rm -f /tmp/nuxt-server-${{ gitea.run_number }}.log
+          fi
+
+      - name: Cleanup
+        if: always()
+        shell: bash
+        run: |
+          docker rmi unicorn-front-test:${{ gitea.run_number }} || true
+          rm -rf /tmp/unicorn-front-test-${{ gitea.run_number }}
+
+  test_main:
+    if: gitea.ref_name == 'main'
+    runs-on: debian
+    steps:
+      - name: Checkout code
+        run: |
+          rm -rf /tmp/unicorn-front-test-${{ gitea.run_number }}
+          mkdir -p /tmp/unicorn-front-test-${{ gitea.run_number }}
+          cd /tmp/unicorn-front-test-${{ gitea.run_number }}
+          git clone --depth 1 -b ${{ gitea.ref_name }} https://${{ gitea.actor }}:${{ gitea.token }}@pibble.shop/MiracleScape/unicorn-front.git .
+      
+      - name: Code quality checks
+        run: |
+          cd /tmp/unicorn-front-test-${{ gitea.run_number }}
+          echo "=== Checking package.json syntax ==="
+          cat unicorn/package.json | python3 -m json.tool > /dev/null && echo "✓ package.json is valid"
+      
+      - name: Run build test
+        id: build_test
+        continue-on-error: true
+        run: |
+          cd /tmp/unicorn-front-test-${{ gitea.run_number }}
+          docker build -t unicorn-front-test:${{ gitea.run_number }} -f Dockerfile . 2>&1 | tee /tmp/build_log_${{ gitea.run_number }}.txt
+          BUILD_STATUS=${PIPESTATUS[0]}
+          echo "✓ Docker build completed"
+          exit $BUILD_STATUS
+      
+      - name: Send build report to MantisBT
+        if: always()
+        run: |
+          # Извлекаем ошибки, предупреждения и уведомления из лога
+          BUILD_LOG=$(cat /tmp/build_log_${{ gitea.run_number }}.txt 2>/dev/null || echo "Log file not found")
+          
+          # Фильтруем только важные строки
+          ERRORS=$(echo "$BUILD_LOG" | grep -iE "error|failed|fatal" || echo "No errors found")
+          WARNINGS=$(echo "$BUILD_LOG" | grep -i "npm warn" || echo "No npm warnings")
+          NOTICES=$(echo "$BUILD_LOG" | grep -i "npm notice" || echo "No npm notices")
+          
+          # Определяем статус сборки
+          if [ "${{ steps.build_test.outcome }}" = "success" ]; then
+            BUILD_STATUS="Build SUCCESSFUL"
+            PRIORITY="10"
+            SEVERITY="10"
+          else
+            BUILD_STATUS="Build FAILED"
+            PRIORITY="40"
+            SEVERITY="50"
+          fi
+          
+          # Формируем описание задачи
+          # Сохраняем данные во временные файлы для безопасной обработки
+          echo "$ERRORS" > /tmp/errors_${{ gitea.run_number }}.txt
+          echo "$WARNINGS" > /tmp/warnings_${{ gitea.run_number }}.txt
+          echo "$NOTICES" > /tmp/notices_${{ gitea.run_number }}.txt
+          echo "$BUILD_LOG" > /tmp/fulllog_${{ gitea.run_number }}.txt
+          
+          {
+            echo "Build Report from Gitea CI/CD"
+            echo ""
+            echo "Build Information:"
+            echo "- Branch: ${{ gitea.ref_name }}"
+            echo "- Commit: ${{ gitea.sha }}"
+            echo "- Run Number: ${{ gitea.run_number }}"
+            echo "- Status: $BUILD_STATUS"
+            echo "- Repository: ${{ gitea.repository }}"
+            echo "- Actor: ${{ gitea.actor }}"
+            echo ""
+            echo "Errors:"
+            cat /tmp/errors_${{ gitea.run_number }}.txt
+            echo ""
+            echo "NPM Warnings:"
+            cat /tmp/warnings_${{ gitea.run_number }}.txt
+            echo ""
+            echo "NPM Notices:"
+            cat /tmp/notices_${{ gitea.run_number }}.txt
+            echo ""
+            echo "Full Build Log (truncated):"
+            cat /tmp/fulllog_${{ gitea.run_number }}.txt | head -n 100
+          } > /tmp/mantis_description_${{ gitea.run_number }}.txt
+          
+          # Отправляем в MantisBT
+          # Используем Python для создания JSON payload
+          RUN_NUM="${{ gitea.run_number }}"
+          REF_NAME="${{ gitea.ref_name }}"
+          
+          echo "=== Creating MantisBT payload ==="
+          python3 -c 'import json,sys;r,s,n,p,v=sys.argv[1:6];d=open(f"/tmp/mantis_description_{r}.txt").read();json.dump({"summary":f"[Gitea Build #{r}] {s} - {n}","description":d,"project":{"name":"unistar MVP"},"category":{"name":"from Build [gitea]"},"version":"MVP V1","tags":[{"name":"build"}],"priority":{"id":int(p)},"severity":{"id":int(v)}},open(f"/tmp/mantis_payload_{r}.json","w"))' "$RUN_NUM" "$BUILD_STATUS" "$REF_NAME" "$PRIORITY" "$SEVERITY"
+          
+          if [ -f /tmp/mantis_payload_${{ gitea.run_number }}.json ]; then
+            echo "✓ Payload created successfully"
+            echo "Payload content:"
+            cat /tmp/mantis_payload_${{ gitea.run_number }}.json | head -c 500
+            echo ""
+          else
+            echo "✗ Failed to create payload"
+            exit 1
+          fi
+          
+          echo "=== Sending to MantisBT ==="
+          # Проверяем наличие токена
+          MANTIS_TOKEN="${{ secrets.MANTIS_API_TOKEN }}"
+          if [ -z "$MANTIS_TOKEN" ]; then
+            echo "⚠️  MANTIS_API_TOKEN secret is not set - skipping MantisBT report"
+            echo "To enable MantisBT reports, add MANTIS_API_TOKEN in repository Settings → Secrets → Actions"
+          else
+            echo "Token configured (length: ${#MANTIS_TOKEN} chars)"
+            
+            # Попробуем без Bearer (старый формат MantisBT)
+            echo "Attempting to send to MantisBT..."
+            RESPONSE=$(curl -X POST "http://178.128.188.105:8081/api/rest/issues" \
+              -H "Content-Type: application/json" \
+              -H "Authorization: $MANTIS_TOKEN" \
+              -d @/tmp/mantis_payload_${{ gitea.run_number }}.json \
+              -w "\nHTTP_CODE:%{http_code}" \
+              -s -v 2>&1)
+            
+            HTTP_CODE=$(echo "$RESPONSE" | grep "HTTP_CODE:" | cut -d: -f2)
+            BODY=$(echo "$RESPONSE" | sed '/HTTP_CODE:/d')
+            
+            echo "HTTP Status: $HTTP_CODE"
+            echo "Full Response:"
+            echo "$BODY" | head -n 50
+            
+            if [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "200" ]; then
+              echo "✓ Successfully sent report to MantisBT"
+            else
+              echo "✗ Failed to send report to MantisBT (HTTP $HTTP_CODE)"
+              if [ "$HTTP_CODE" = "403" ]; then
+                echo "Error: Access denied. Please check:"
+                echo "  1. User has permission to create issues in project 'unistar MVP'"
+                echo "  2. Category 'from Build [gitea]' exists"
+                echo "  3. Version 'MVP V1' exists in the project"
+                echo "  4. Tag 'build' exists or can be created"
+              fi
+            fi
+          fi
+          
+          # Удаляем временные файлы
+          rm -f /tmp/build_log_${{ gitea.run_number }}.txt
+          rm -f /tmp/mantis_description_${{ gitea.run_number }}.txt
+          rm -f /tmp/mantis_payload_${{ gitea.run_number }}.json
+          rm -f /tmp/errors_${{ gitea.run_number }}.txt
+          rm -f /tmp/warnings_${{ gitea.run_number }}.txt
+          rm -f /tmp/notices_${{ gitea.run_number }}.txt
+          rm -f /tmp/fulllog_${{ gitea.run_number }}.txt
+      
+      - name: Cleanup
+        if: always()
+        run: |
+          docker rmi unicorn-front-test:${{ gitea.run_number }} || true
+          rm -rf /tmp/unicorn-front-test-${{ gitea.run_number }}
+         
+  deploy_frontdev1:
+    if: gitea.ref_name == 'main'
+    needs: test_main
+    runs-on: debian
+    steps:
+      - name: Deploy with Docker Compose
+        id: deploy
+        run: |
+          cd /var/www/unicorn-front || mkdir -p /var/www/unicorn-front && cd /var/www/unicorn-front
+          
+          # Clone or update repository
+          if [ -d .git ]; then
+            echo "=== Updating existing repository ==="
+            git remote set-url origin https://${{ gitea.actor }}:${{ gitea.token }}@pibble.shop/MiracleScape/unicorn-front.git
+            git fetch --all --prune
+            git fetch origin ${{ gitea.ref_name }}
+          else
+            echo "=== Cloning repository ==="
+            git clone -b ${{ gitea.ref_name }} https://${{ gitea.actor }}:${{ gitea.token }}@pibble.shop/MiracleScape/unicorn-front.git .
+          fi
+          
+          # Save current commit BEFORE updating
+          CURRENT_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "")
+          if [ -n "$CURRENT_COMMIT" ]; then
+            echo "$CURRENT_COMMIT" > /tmp/unicorn-front-previous-commit.txt
+            echo "Saved previous commit: $CURRENT_COMMIT"
+          fi
+          
+          # Update to latest version
+          git reset --hard origin/${{ gitea.ref_name }}
+          git clean -fd
+          NEW_COMMIT=$(git rev-parse HEAD)
+          echo "=== Deploying commit: $NEW_COMMIT ==="
+          echo "Previous commit was: $CURRENT_COMMIT"
+          
+          # Verify it's a new version
+          if [ "$CURRENT_COMMIT" = "$NEW_COMMIT" ]; then
+            echo "⚠️  WARNING: Same commit, forcing rebuild anyway"
+          fi
+          
+          # Docker deployment
+          echo "=== Stopping old containers ==="
+          docker compose -f docker-compose.yml down
+          echo "=== Cleaning old images ==="
+          docker images | grep unicorn-nuxt | grep '<none>' | awk '{print $3}' | xargs -r docker rmi || true
+          echo "=== Building without cache ==="
+          docker compose -f docker-compose.yml build --no-cache --pull
+          echo "=== Starting new container ==="
+          docker compose -f docker-compose.yml up -d
+          sleep 10
+          docker compose -f docker-compose.yml ps
+          docker logs unicorn-nuxt --tail 100
+      
+      - name: Health check
+        id: health
+        run: |
+          echo "Waiting for container to be healthy..."
+          sleep 10
+          
+          # Check container is running
+          if ! docker ps | grep unicorn-nuxt | grep -q "Up"; then
+            echo "✗ Container is not running"
+            docker logs unicorn-nuxt --tail 50
+            exit 1
+          fi
+          
+          # Check HTTP response
+          for i in {1..5}; do
+            if curl -f -s http://localhost:3000 > /dev/null; then
+              echo "✓ Container is healthy and responding"
+              exit 0
+            fi
+            echo "Attempt $i/5 failed, waiting..."
+            sleep 3
+          done
+          
+          echo "✗ Container not responding to HTTP requests"
+          docker logs unicorn-nuxt --tail 50
+          exit 1
+      
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "=== DEPLOYMENT FAILED - ROLLING BACK ==="
+          cd /var/www/unicorn-front
+          PREVIOUS_COMMIT=$(cat /tmp/unicorn-front-previous-commit.txt)
+          echo "Rolling back to commit: $PREVIOUS_COMMIT"
+          git reset --hard $PREVIOUS_COMMIT
+          docker compose -f docker-compose.yml down
+          docker compose -f docker-compose.yml up -d --build
+          sleep 10
+          docker compose -f docker-compose.yml ps
+          docker logs unicorn-nuxt --tail 50
+          echo "=== ROLLBACK COMPLETED ==="
+      
+      - name: Deployment success
+        if: success()
+        run: |
+          cd /var/www/unicorn-front
+          NEW_COMMIT=$(git rev-parse HEAD)
+          echo "✓✓✓ DEPLOYMENT SUCCESSFUL ✓✓✓"
+          echo "Deployed commit: $NEW_COMMIT"
+          echo "Application is running at http://localhost:3000"
+          docker compose -f docker-compose.yml ps
+

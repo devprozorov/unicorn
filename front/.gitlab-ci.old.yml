@@ -1,0 +1,28 @@
+stages:
+  - deploy
+
+deploy_prod:
+  stage: deploy
+  tags:
+    - dev1
+  only:
+    - main
+
+  script:
+    - echo "🚀 Deploy Unicorn Nuxt"
+
+    # 1. Копируем код в рабочую папку
+    - rm -rf /home/gitlab-runner/unicorn
+    - mkdir -p /home/gitlab-runner/unicorn
+    - cp -r . /home/gitlab-runner/unicorn
+
+    # 2. Переходим в папку деплоя
+    - cd /home/gitlab-runner/unicorn
+
+    # 3. Docker deploy
+    - docker compose down
+    - docker compose build
+    - docker compose up -d
+
+    # 4. Очистка
+    - docker image prune -f

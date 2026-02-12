@@ -1,0 +1,19 @@
+name: Deploy Dev
+
+on:
+  push:
+    branches:
+      - dev
+
+jobs:
+  deploy_dev:
+    runs-on: debian
+    steps:
+      - name: Dev deployment placeholder
+        run: |
+          echo "✓ Dev branch pushed successfully"
+          echo "Branch: ${{ gitea.ref_name }}"
+          echo "Commit: ${{ gitea.sha }}"
+          echo "Author: ${{ gitea.actor }}"
+          echo "Note: Dev branch deployment is disabled."
+          echo "To deploy to production, merge dev into main."

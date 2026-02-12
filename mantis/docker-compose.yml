@@ -1,0 +1,24 @@
+services:
+  mantis_v2_new:
+    image: vimagick/mantisbt
+    container_name: mantis_app_new
+    restart: always
+    depends_on:
+      - mantis_db_v3
+    environment:
+      MANTIS_DB_HOST: mantis_db_v2_new
+      MANTIS_DB_NAME: mantisbt
+      MANTIS_DB_USER: mantisuser
+      MANTIS_DB_PASSWORD: "sexforbibizanunghjg444"
+    ports:
+      - "8081:80"
+  mantis_db_v3:
+    image: mariadb:11
+    container_name: mantis_db_v3
+    environment:
+      MARIADB_ROOT_PASSWORD: mantis_root_v3
+      MARIADB_DATABASE: mantisbt
+      MARIADB_USER: mantisuser
+      MARIADB_PASSWORD: "sexforbibizanunghjg444"
+    volumes:
+      - /srv/docker/mantis_v3/db:/var/lib/mysql

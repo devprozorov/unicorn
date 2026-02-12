@@ -1,0 +1,11 @@
+/bin/
+/dist/
+/tmp/
+/vendor/
+*.exe
+*.out
+*.log
+#.env
+.DS_Store
+.idea/
+.vscode/

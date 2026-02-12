@@ -1,0 +1,13 @@
+stages:
+  - deploy
+
+deploy_dev1:
+  stage: deploy
+  tags:
+    - dev1
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+  script:
+    # Деплой
+    - docker compose -f docker-compose.yml up -d --build --remove-orphans
+    - docker compose -f docker-compose.yml ps

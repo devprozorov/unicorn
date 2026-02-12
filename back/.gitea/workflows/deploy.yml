@@ -1,0 +1,31 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy_backdev1:
+    runs-on: debian
+    steps:
+      - name: Deploy with Docker Compose
+        run: |
+          cd /var/www/unicorn-back || mkdir -p /var/www/unicorn-back && cd /var/www/unicorn-back
+          
+          # Инициализация репозитория если нужно
+          if [ ! -d .git ]; then
+            git clone -b ${{ gitea.ref_name }} https://${{ gitea.actor }}:${{ gitea.token }}@pibble.shop/MiracleScape/unicorn-back.git .
+          fi
+          
+          # Обновить код
+          git remote set-url origin https://${{ gitea.actor }}:${{ gitea.token }}@pibble.shop/MiracleScape/unicorn-back.git
+          git fetch origin
+          git reset --hard origin/${{ gitea.ref_name }}
+          
+          # Деплой
+          docker rm -f unicorn-api || true
+          docker compose -f docker-compose.yml up -d --build --remove-orphans
+          
+          echo "✓ Deployment completed!"
+          docker compose -f docker-compose.yml ps

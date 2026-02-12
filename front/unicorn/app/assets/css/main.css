@@ -1,0 +1,146 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body {
+  @apply bg-white text-gray-900 antialiased;
+  min-height: 100vh;
+  font-family: 'Manrope', 'Inter', system-ui, -apple-system, sans-serif;
+  overflow-x: hidden;
+}
+
+#__nuxt {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+}
+
+#__nuxt > footer {
+  margin-top: auto;
+}
+
+img,
+video,
+canvas,
+svg {
+  max-width: 100%;
+}
+.hero-title {
+  @apply text-3xl font-semibold leading-[1.25];
+}
+
+.hero-text {
+  @apply text-sm text-gray-700 leading-[1.6];
+  max-width: 420px;
+}
+
+.hero-motto {
+  @apply text-sm text-gray-500 italic;
+}
+
+.stat-value {
+  @apply text-xl font-semibold;
+}
+
+.stat-label {
+  @apply text-xs text-gray-500;
+}
+.hero-title {
+  font-size: 34px;
+  line-height: 1.18;
+  font-weight: 600;
+}
+
+.hero-text {
+  font-size: 13px;
+  line-height: 1.65;
+  color: #4b5563; /* gray-600 */
+  max-width: 430px;
+}
+
+.hero-motto {
+  font-size: 13px;
+  line-height: 1.4;
+  color: #6b7280; /* gray-500 */
+  font-style: italic;
+}
+
+.stat-value {
+  font-size: 22px;
+  line-height: 1.1;
+  font-weight: 600;
+}
+
+.stat-label {
+  font-size: 12px;
+  line-height: 1.2;
+  color: #6b7280; /* gray-500 */
+}
+
+.hero-media {
+  height: 300px;
+  border-radius: 28px;
+  background: linear-gradient(135deg, #b9c3ff 0%, #e6c8ff 55%, #bfe9ff 100%);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.08);
+}
+
+.emp-h2{
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 12px; /* НЕ 18 */
+}
+.emp-row{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 20px;
+}
+.stat-value {
+  font-size: 20px;
+  line-height: 1.1;
+  font-weight: 600;
+}
+
+.stat-label {
+  font-size: 12px;
+  line-height: 1.2;
+  color: #6b7280;
+}
+.hero {
+  width: 100%;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 24px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: center;
+  gap: 32px;
+  height: 350px;
+}
+
+.content-screen {
+  padding-top: 12px; /* не 24 */
+}
+
+/* Контент = вся высота экрана */
+.viewport {
+  height: 100%;
+  display: flex;
+  align-items: center;   /* вертикальный центр hero */
+}
+
+/* HEADER поверх */
+header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 50;
+}
+
+.feature {
+  height: 200px
+}

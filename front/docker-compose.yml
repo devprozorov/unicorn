@@ -1,0 +1,7 @@
+services:
+  nuxt:
+    container_name: unicorn-nuxt
+    build: .
+    restart: always
+    ports:
+      - "3000:3000"
